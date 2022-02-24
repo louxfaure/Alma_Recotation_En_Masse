@@ -49,16 +49,20 @@ def item_change_location(item,location,call):
     """
     mms_id, holding_id, pid = item.find(".//mms_id").text, item.find(".//holding_id").text, item.find(".//pid").text
     item.find(".//item_data/location").text = location
+    # On nettoie la cote présente au niveau de l'exemplaire
     item.find(".//item_data/alternative_call_number").text = ''
     item.find(".//item_data/alternative_call_number_type").text = ''
-    # item.find(".//item_data/location").text = location
+    # On ne renvoie pas les infos de la holdings
     holding_data = item.find(".//holding_data")
     item.remove(holding_data)
+    # Si un autre exemplaire lié à la même notice a déjà été traité
     if mms_id in processed_record_dict:
-            if location_code in processed_record_dict[mms_id]:
-                if processed_record_dict[mms_id][location_code] != location:
-                    multi_call_report.write("{}\n".format(barcode))
-                    item.find(".//item_data/alternative_call_number").text = call
+        # Si la localisation était la même que celle de l'exemplaire déjà traité
+        if location_code in processed_record_dict[mms_id]:
+            # Si les cotes sont différentes alors on créé la cote sous l'exemplaire
+            if processed_record_dict[mms_id][location_code] != call:
+                multi_call_report.write("{}\n".format(barcode))
+                item.find(".//item_data/alternative_call_number").text = call
     return mms_id, holding_id, pid
 
 def update_holding_data(holding,new_call):
