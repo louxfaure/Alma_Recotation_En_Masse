@@ -1,0 +1,6 @@
+[submodule "Alma_Apis_Interface"]
+	path = Alma_Apis_Interface
+	url = https://github.com/louxfaure/Alma_Apis_Interface.git
+[submodule "Logs"]
+	path = Logs
+	url = https://github.com/louxfaure/logs.git
