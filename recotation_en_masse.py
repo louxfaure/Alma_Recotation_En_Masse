@@ -6,6 +6,7 @@ import re
 import logging
 import csv
 import xml.etree.ElementTree as ET
+from chardet import detect
 
 #Modules maison
 from Abes_Apis_Interface.AbesXml import AbesXml
@@ -22,11 +23,18 @@ LIBRARY_CODE = 1601900000
 
 REGION = 'EU'
 INSTITUTION = 'ub'
-API_KEY = os.getenv('TEST_UB_API')
+API_KEY = os.getenv('PROD_UB_BIB_API')
 
-# IN_FILE = '/home/loux/Téléchargements/Fichier_de_test.csv'
-IN_FILE = 'Echantillon.csv'
-OUT_FILE = 'Rapport_traitement.csv'
+FILE_NAME = 'Dewey 20201218 cotes OE Scoop V3'
+IN_FILE = '/media/sf_Partage_LouxBox/{}.csv'.format(FILE_NAME)
+OUT_FILE = '/media/sf_Partage_LouxBox/{}_Rapport.csv'.format(FILE_NAME)
+CALL_ERROR_FILE = '/media/sf_Partage_LouxBox/{}_Anomalies_Cotes.csv'.format(FILE_NAME)
+
+# get file encoding type
+def get_encoding_type(file):
+    with open(file, 'rb') as f:
+        rawdata = f.read()
+    return detect(rawdata)['encoding']
 
 def item_change_location(item,location,call):
     """Change location and remove holdinds infos
@@ -48,7 +56,7 @@ def item_change_location(item,location,call):
     item.remove(holding_data)
     if mms_id in processed_record_dict:
             if location_code in processed_record_dict[mms_id]:
-                if processed_record_dict[mms_id][location_code] != call:
+                if processed_record_dict[mms_id][location_code] != location:
                     multi_call_report.write("{}\n".format(barcode))
                     item.find(".//item_data/alternative_call_number").text = call
     return mms_id, holding_id, pid
@@ -82,21 +90,24 @@ alma_api = Alma_Apis_Records.AlmaRecords(apikey=API_KEY, region=REGION, service=
 locations_dict = conf.get_locations(LIBRARY_CODE)
 log_module.info("Liste des localisation chargée pour la bibliothèque {} :: Main :: Début du traitement".format(LIBRARY_CODE))
 
-report = open(OUT_FILE, "w")
+report = open(OUT_FILE, "w",  encoding='utf-8')
 report.write("Code-barres\tStatut\tMessage\n")
 
 processed_record_dict = {}
 toprocess_holding_dict = {}
-multi_call_report = open('Anomalies_Cotes.csv', "w")
-
+multi_call_report = open(CALL_ERROR_FILE, "w", encoding='utf-8')
+multi_call_report.write("code-barres\n")
 
 ###Update item sequence
 # ###################### 
-with open(IN_FILE, newline='') as f:
+from_codec = get_encoding_type(IN_FILE)
+with open(IN_FILE, 'r', encoding=from_codec, newline='') as f:
     reader = csv.reader(f, delimiter=';')
     headers = next(reader)
     # We read the file
     for row in reader:
+        if len(row) < 2:
+            continue
         barcode = row[0]
         # Test if new call is defined
         if row[1] is None or row[1] == '':
@@ -142,32 +153,34 @@ with open(IN_FILE, newline='') as f:
             location_code: call
         }
         if new_holding_id not in toprocess_holding_dict:
-            toprocess_holding_dict[new_holding_id] = call
+            toprocess_holding_dict[new_holding_id] = {
+                'call' : call,
+                'barcode': barcode
+            }
         log_module.info("{} :: Succes :: L'exemplaire est maintenant rattaché à la Holding {}".format(barcode,new_holding_id))
-        report.write("{}\tSucces\tExemplaire déplacé\n".format(barcode))
 log_module.info("FIN DU DEPLACEMENT DES EXEMPLAIRES")
 
 ###Update new holding sequence
 # ############################
 log_module.info("DEBUT DE LA MODIFICATION DES HOLDINGS")
-for new_holding_id, call in toprocess_holding_dict.items():
+for new_holding_id in toprocess_holding_dict.keys():
+    call = toprocess_holding_dict[new_holding_id]['call']
+    barcode = toprocess_holding_dict[new_holding_id]['barcode']
     # Get new holding
     get_holding_status, get_holding_response = alma_api.get_holding(mms_id, new_holding_id)
     if get_holding_status == 'Error':
         log_module.error("{} :: Echec :: {}".format(new_holding_id,get_holding_response))
-        report.write("{}\tErreur Retrouve Holding\t{}\n".format(new_holding_id,get_holding_response))
+        report.write("{}\tErreur Retrouve Holding\t{}\n".format(barcode,get_holding_response))
         continue
     changed_holding = update_holding_data(get_holding_response,call)
     #Update new Holding in Alma
     set_holding_status, set_holding_response = alma_api.set_holding(mms_id, new_holding_id,changed_holding)
     if set_holding_status == 'Error':
         log_module.error("{} :: Echec :: {}".format(new_holding_id,set_holding_response))
-        report.write("{}\tErreur Ecriture Holding\t{}\n".format(new_holding_id,set_holding_response))
+        report.write("{}\tErreur Ecriture Holding\t{}\n".format(barcode,set_holding_response))
         continue
     log_module.debug(set_holding_response)
     log_module.info("{} :: Succes :: La holding a été mise à jour".format(new_holding_id))
-    report.write("{}\tSucces\tCote Holding modifiée\n".format(new_holding_id))
-
 
 report.close
 
